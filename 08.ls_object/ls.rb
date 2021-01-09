@@ -6,91 +6,102 @@ require 'etc'
 
 module LS
   class Command
-    def initialize(argv)
-      @argv = argv
+    def initialize(options)
+      @options = options
+      @show_options = {}
     end
 
     def call
       opt = OptionParser.new
 
-      options = {}
-      opt.on('-l') { |v| options[:l] = v }
-      opt.on('-a') { |v| options[:a] = v }
-      opt.on('-r') { |v| options[:r] = v }
-      opt.parse!(@argv)
+      opt.on('-l') { |v| @show_options[:l] = v }
+      opt.on('-a') { |v| @show_options[:a] = v }
+      opt.on('-r') { |v| @show_options[:r] = v }
+      opt.parse!(@options)
 
-      show_files(options)
+      puts files_info
     end
 
     private
 
-    def show_files(options)
-      files = pick_up_and_sort_files(options)
-      options[:l] ? show_in_detail(files) : show_simply(files)
+    def in_detail?
+      @show_options[:l]
     end
 
-    def pick_up_and_sort_files(options)
-      files = Dir.entries('.').sort.map do |file|
-        next if file[0] == '.' && options[:a].nil?
-
-        LS::File.new(file)
-      end.compact
-      files.reverse! if options[:r]
-      files
+    def all?
+      @show_options[:a]
     end
 
-    def show_simply(files)
+    def reverse?
+      @show_options[:r]
+    end
+
+    def files_info
+      files = pick_up_and_sort_files
+      in_detail? ? create_files_in_detail(files) : create_files_simply(files)
+    end
+
+    def pick_up_and_sort_files
+      files = if all?
+                Dir.glob('*', File::FNM_DOTMATCH).sort.map { |file| FileInfo.new(file) }
+              else
+                Dir.glob('*').sort.map { |file| FileInfo.new(file) }
+              end
+      reverse? ? files.reverse : files
+    end
+
+    def create_files_simply(files)
       filenames = files.map(&:name)
       rows_count = (filenames.size.to_f / 3).ceil
       (rows_count * 3 - filenames.size).times { filenames.push '' }
       rows = create_rows(filenames, rows_count)
-      rows.each { |row| puts row.join('     ') }
+      rows.map { |row| row.join('     ') }.join("\n")
     end
 
     def create_rows(filenames, rows_count)
-      columns = filenames.each_slice(rows_count).to_a
-      columns.map do |column|
-        max_length = column.map(&:length).max
-        column.map! { |filename| filename.ljust(max_length) }
-      end
-      columns.transpose
+      rows = filenames.each_slice(rows_count).to_a
+      rows.map! do |columns|
+        max_length = columns.map(&:length).max
+        columns.map { |column| column.ljust(max_length) }
+      end.transpose
     end
 
-    def show_in_detail(files)
-      max_size = Math.log10(files.map(&:size).max).to_i + 1
+    def create_files_in_detail(files)
+      nlink_digits = files.map(&:nlink).max.digits.length
+      size_digits = files.map(&:size).max.digits.length
       total_blocks = 0
       lines = files.map do |file|
-        words = create_words(file, max_size)
+        words = create_words(file, nlink_digits, size_digits)
         total_blocks += file.blocks
         words.join(' ')
       end
-      puts "total #{total_blocks}"
-      puts lines.join("\n")
+      "total #{total_blocks}\n#{lines.join("\n")}"
     end
 
-    def create_words(file, max_size)
+    def create_words(file, nlink_digits, size_digits)
       words = []
       words.push file.ftype + file.permission
-      words.concat([file.nlink, file.owner, file.group])
-      words.push file.size.to_s.rjust(max_size)
+      words.push file.nlink.to_s.rjust(nlink_digits)
+      words.concat([file.owner, file.group])
+      words.push file.size.to_s.rjust(size_digits)
       words.concat([file.timestamp, file.name])
       words
     end
   end
 
-  class File
+  class FileInfo
     attr_reader :name, :nlink, :size, :blocks
 
     def initialize(filename)
       @name = filename
-      @filestat = ::File.lstat(filename)
+      @filestat = File.lstat(filename)
       @nlink = @filestat.nlink
       @size = @filestat.size
       @blocks = @filestat.blocks
     end
 
     def ftype
-      type = ::File.ftype(@name)[0]
+      type = File.ftype(@name)[0]
       type == 'f' ? '-' : type
     end
 
