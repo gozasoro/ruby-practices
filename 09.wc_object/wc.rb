@@ -6,18 +6,15 @@ require 'optparse'
 module WC
   class Command
     def initialize(options_and_files)
-      @options_and_files = options_and_files
       @show_options = {}
+      opt = OptionParser.new
+      opt.on('-l') { |v| @show_options[:l] = v }
+      @match_files = opt.parse(options_and_files)
     end
 
     def call
-      opt = OptionParser.new
-
-      opt.on('-l') { |v| @show_options[:l] = v }
-      opt.parse!(@options_and_files)
-
-      files = @options_and_files.empty? ? create_stdin_file : create_files(@options_and_files)
-      puts show(files)
+      files_info = @match_files.empty? ? create_stdin_file_info : create_files_info(@match_files)
+      show(files_info)
     end
 
     private
@@ -26,12 +23,12 @@ module WC
       @show_options[:l]
     end
 
-    def create_stdin_file
+    def create_stdin_file_info
       [StdinFileInfo.new(readlines)]
     end
 
-    def create_files(argv)
-      filenames = argv.map { |arg| Dir.glob(arg) }.flatten
+    def create_files_info(match_files)
+      filenames = match_files.map { |match_file| Dir.glob(match_file) }.flatten
       filenames.map { |filename| FileInfo.new(filename) }
     end
 
@@ -55,26 +52,31 @@ module WC
     def calculate_width(files)
       return 7 if files.first.is_a?(StdinFileInfo)
 
-      if line_only?
-        files.map(&:line_count).max.to_s.length
-      else
-        files.map(&:size).max.to_s.length
-      end
+      field = line_only? ? :line_count : :size
+      files.map(&field).max.to_s.length
+    end
+  end
+
+  module FileFunction
+    def count_words(lines)
+      lines.join(' ').split(/\s+/).size
     end
   end
 
   class StdinFileInfo
+    include FileFunction
     attr_reader :size, :name, :line_count, :word_count
 
     def initialize(lines)
       @size = lines.map(&:bytesize).sum
       @name = ''
       @line_count = lines.size
-      @word_count = FileFunction.count_words(lines)
+      @word_count = count_words(lines)
     end
   end
 
   class FileInfo
+    include FileFunction
     attr_reader :size, :name, :line_count, :word_count
 
     def initialize(filename)
@@ -91,17 +93,11 @@ module WC
       File.open(filename) do |file|
         lines = file.readlines
         line_count = lines.count
-        word_count = FileFunction.count_words(lines)
+        word_count = count_words(lines)
       end
       [line_count, word_count]
     end
   end
-
-  module FileFunction
-    def self.count_words(lines)
-      lines.join(' ').split(/\s+/).size
-    end
-  end
 end
 
-WC::Command.new(ARGV).call
+puts WC::Command.new(ARGV).call
