@@ -7,19 +7,19 @@ require 'etc'
 module LS
   class Command
     def initialize(options)
-      @options = options
       @show_options = {}
-    end
 
-    def call
       opt = OptionParser.new
 
       opt.on('-l') { |v| @show_options[:l] = v }
       opt.on('-a') { |v| @show_options[:a] = v }
       opt.on('-r') { |v| @show_options[:r] = v }
-      opt.parse!(@options)
+      opt.parse!(options)
+    end
 
-      puts files_info
+    def files_info
+      files = pick_up_and_sort_files
+      in_detail? ? create_files_in_detail(files) : create_files_simply(files)
     end
 
     private
@@ -36,18 +36,17 @@ module LS
       @show_options[:r]
     end
 
-    def files_info
-      files = pick_up_and_sort_files
-      in_detail? ? create_files_in_detail(files) : create_files_simply(files)
-    end
-
     def pick_up_and_sort_files
       files = if all?
-                Dir.glob('*', File::FNM_DOTMATCH).sort.map { |file| FileInfo.new(file) }
+                create_file_info(Dir.glob('*', File::FNM_DOTMATCH))
               else
-                Dir.glob('*').sort.map { |file| FileInfo.new(file) }
+                create_file_info(Dir.glob('*'))
               end
       reverse? ? files.reverse : files
+    end
+
+    def create_file_info(match_files)
+      match_files.sort.map { |file| FileInfo.new(file) }
     end
 
     def create_files_simply(files)
@@ -60,7 +59,7 @@ module LS
 
     def create_rows(filenames, rows_count)
       rows = filenames.each_slice(rows_count).to_a
-      rows.map! do |columns|
+      rows.map do |columns|
         max_length = columns.map(&:length).max
         columns.map { |column| column.ljust(max_length) }
       end.transpose
@@ -108,8 +107,7 @@ module LS
     def permission
       binary = @filestat.mode.to_s(2)[-9, 9]
       permission_chars = 'rwxrwxrwx'.chars.map.with_index do |c, index|
-        c = '-' if binary[index] == '0'
-        c
+        binary[index] == '0' ? '-' : c
       end
       permission_chars.join
     end
@@ -128,4 +126,4 @@ module LS
   end
 end
 
-LS::Command.new(ARGV).call
+puts LS::Command.new(ARGV).files_info
